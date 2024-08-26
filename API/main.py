@@ -8,8 +8,6 @@ import requests
 FileName=[]
 app = FastAPI()
 
-SUPABASE_URL = 'https://fadgcptleqcskuvdxuri.supabase.co'
-SUPABASE_API = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhZGdjcHRsZXFjc2t1dmR4dXJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjAwNzAwMjQsImV4cCI6MjAzNTY0NjAyNH0.l8dg0upUoIHDkAOOMvQ5A_LDe8b0zkkTzi1buQG8Hfg'
 
 @app.put("/")
 async def convert_to_pdf(url: str):
