@@ -12,7 +12,7 @@ from typing import List, Dict
 app = FastAPI()
 
 # Initialize the summarizer model
-summarizer = pipeline('summarization', model="sshleifer/distilbart-cnn-12-6")
+summarizer = pipeline('summarization', model='facebook/bart-large-cnn')
 
 class SummaryResponse(BaseModel):
     page: int
