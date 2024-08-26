@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 import PyPDF2
 from transformers import pipeline
-from typing import List, Dict
+from typing import List
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from PyPDF2 import PdfWriter, PdfReader
 
 app = FastAPI()
 
@@ -24,21 +27,17 @@ class SummarizationResponse(BaseModel):
 @app.put("/Convert_to_pdf")
 async def convert_to_pdf(url: str):
     try:
-        # Define the current time and filename
         current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         filename = f"{current_time}.pdf"
         size = Path(url).stat().st_size
 
-        # Check file size
         if size > 10000000:
             return {"error": "File is too large", "size_mb": size / 1000000}
 
-        # Check if the file is already a PDF
         if url.lower().endswith('.pdf'):
             os.rename(url, filename)
             return {"message": "Already a PDF", "name": filename}
 
-        # Convert image to PDF
         a = cv2.imread(url)
         b = pytesseract.image_to_pdf_or_hocr(a, extension='pdf')
 
@@ -49,21 +48,45 @@ async def convert_to_pdf(url: str):
     except Exception as e:
         return {"error": str(e)}
 
-@app.put("/Summarization", response_model=SummarizationResponse)
-async def summarize(url: str) -> SummarizationResponse:
+@app.put("/Summarization")
+async def summarize(url: str):
     try:
-        # Open and read the PDF file
+        pdf_writer = PdfWriter()
         with open(url, "rb") as pdf_file:
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            pdf_reader = PdfReader(pdf_file)
             summaries = []
 
             # Extract and summarize text from each page
             for page_num in range(len(pdf_reader.pages)):
                 page_text = pdf_reader.pages[page_num].extract_text()
-                if page_text.strip():  # Only summarize if there's text
+                if page_text.strip():
                     summary = summarizer(page_text, max_length=200, min_length=20, do_sample=False)
                     summaries.append({"page": page_num + 1, "summary": summary[0]['summary_text']})
 
-            return {"summaries": summaries}
+                    # Add the original page
+                    pdf_writer.add_page(pdf_reader.pages[page_num])
+
+                    # Create a new PDF page with the summary
+                    summary_pdf_path = f"summary_page_{page_num + 1}.pdf"
+                    c = canvas.Canvas(summary_pdf_path, pagesize=letter)
+                    text = summary[0]['summary_text']
+                    c.drawString(72, 750, f"Summary for Page {page_num + 1}:")
+                    c.drawString(72, 730, text)
+                    c.save()
+
+                    # Merge the summary page with the original PDF
+                    with open(summary_pdf_path, "rb") as summary_pdf:
+                        summary_reader = PdfReader(summary_pdf)
+                        pdf_writer.add_page(summary_reader.pages[0])
+
+                    # Clean up the temporary summary PDF file
+                    os.remove(summary_pdf_path)
+
+            # Save the output PDF with summaries
+            output_filename = f"summarized_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
+            with open(output_filename, "wb") as output_pdf:
+                pdf_writer.write(output_pdf)
+
+            return {"output_pdf": output_filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
