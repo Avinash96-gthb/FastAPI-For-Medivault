@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,File, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import cv2
 import pytesseract
 from datetime import datetime
 import os
+import shutil
 from pathlib import Path
 import PyPDF2
 from transformers import pipeline
@@ -13,8 +15,23 @@ from reportlab.pdfgen import canvas
 from PyPDF2 import PdfWriter, PdfReader
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
+from fastapi.middleware.cors import CORSMiddleware
+
+
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+UPLOAD_FOLDER = "uploads"
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 # Initialize the summarizer model
 summarizer = pipeline('summarization', model='Falconsai/medical_summarization')
@@ -26,36 +43,38 @@ class SummaryResponse(BaseModel):
 class SummarizationResponse(BaseModel):
     summaries: List[SummaryResponse]
 
-@app.put("/Convert_to_pdf")
-async def convert_to_pdf(url: str):
+@app.post("/convert-to-pdf")
+async def convert_to_pdf(file: UploadFile = File(...)):
     try:
+        # Create a timestamped filename
         current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        filename = f"{current_time}.pdf"
-        file_path = Path(url)
+        pdf_filename = f"{current_time}.pdf"
+        file_location = os.path.join(UPLOAD_FOLDER, file.filename)
 
-        # Check if the file exists
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="File not found")
-        
-        size = file_path.stat().st_size
-        
-        if size > 10000000:  # 10 MB limit
-            return {"error": "File is too large", "size_mb": size / 1000000}
+        # Save the uploaded file temporarily
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-        if url.lower().endswith('.pdf'):
-            return {"message": "Already a PDF", "name": filename}
+        # Check if the file is already a PDF
+        if file.filename.lower().endswith('.pdf'):
+            pdf_path = file_location
+        else:
+            # Read the uploaded file using OpenCV
+            image = cv2.imread(file_location)
+            if image is None:
+                raise HTTPException(status_code=400, detail="Unable to read the file as an image")
 
-        # Read image and convert to PDF
-        a = cv2.imread(url)
-        if a is None:
-            raise HTTPException(status_code=400, detail="Unable to read image file")
-        
-        b = pytesseract.image_to_pdf_or_hocr(a, extension='pdf')
+            # Convert the image to PDF using pytesseract
+            pdf_bytes = pytesseract.image_to_pdf_or_hocr(image, extension='pdf')
 
-        with open(filename, 'wb') as f:
-            f.write(b)
+            # Save the converted PDF with the current date and time as the filename
+            pdf_path = os.path.join(UPLOAD_FOLDER, pdf_filename)
+            with open(pdf_path, 'wb') as f:
+                f.write(pdf_bytes)
 
-        return {"message": "File converted successfully", "name": filename}
+        # Return the PDF file as a response
+        return FileResponse(path=pdf_path, media_type="application/pdf", filename=pdf_filename)
+    
     except Exception as e:
         return {"error": str(e)}
 
